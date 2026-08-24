@@ -1,6 +1,7 @@
 import json
 from unittest.mock import Mock, patch
 
+import lazyllm
 from lazyllm import (
     Document,
     OnlineChatModule,
@@ -46,6 +47,41 @@ def test_online_chat_module_tracing(exporter):
     assert spans[0].attributes.get('lazyllm.entity.config.model') == 'mock-chat'
     assert spans[0].attributes.get('gen_ai.request.model') == 'mock-chat'
     assert spans[0].attributes.get('lazyllm.entity.config.base_url') == 'http://mock-api.example.com'
+
+
+def test_dynamic_online_chat_module_tracing_records_supplier_usage(exporter, monkeypatch):
+    module = OnlineChatModule(
+        source='dynamic', type='llm', model='mock-chat',
+        url='http://mock-api.example.com',
+    )
+    parent_module_id = 'test-parent-module'
+    module.used_by(parent_module_id)
+    supplier = Mock(_module_id='dynamic-supplier')
+
+    def forward(*args, **kwargs):
+        lazyllm.globals['usage'][supplier._module_id] = {
+            'prompt_tokens': 12,
+            'completion_tokens': 3,
+        }
+        return 'mock response'
+
+    supplier.forward = forward
+    monkeypatch.setattr(module, '_get_supplier', lambda: supplier)
+
+    try:
+        assert module('hello') == 'mock response'
+        spans = exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].attributes.get('gen_ai.usage.input_tokens') == 12
+        assert spans[0].attributes.get('gen_ai.usage.output_tokens') == 3
+        assert spans[0].attributes.get('gen_ai.usage.total_tokens') == 15
+        assert lazyllm.globals['usage'][parent_module_id] == {
+            'prompt_tokens': 12,
+            'completion_tokens': 3,
+        }
+    finally:
+        lazyllm.globals['usage'].pop(supplier._module_id, None)
+        lazyllm.globals['usage'].pop(parent_module_id, None)
 
 
 def test_online_embedding_module_tracing(exporter):

@@ -123,7 +123,23 @@ class _DynamicSourceRouterMixin(ModuleBase):
 
     def forward(self, *args, **kwargs):
         merged = self._merge_dynamic_forward_kwargs(kwargs)
-        return self._get_supplier().forward(*args, **merged)
+        supplier = self._get_supplier()
+        result = supplier.forward(*args, **merged)
+        usage = (globals.get('usage') or {}).get(getattr(supplier, '_module_id', None))
+        if usage:
+            usage = dict(usage)
+            globals['usage'][self._module_id] = usage
+            parent_module_id = getattr(self, '_used_by_moduleid', None)
+            if parent_module_id:
+                parent_usage = globals['usage'].get(parent_module_id)
+                if not parent_usage:
+                    globals['usage'][parent_module_id] = dict(usage)
+                elif any(parent_usage.get(k, -1) == -1 or v == -1 for k, v in usage.items()):
+                    globals['usage'][parent_module_id] = {k: -1 for k in usage}
+                else:
+                    for key, value in usage.items():
+                        parent_usage[key] = parent_usage.get(key, 0) + value
+        return result
 
 
 ConfigsDict = _GlobalConfig.ConfigsDict

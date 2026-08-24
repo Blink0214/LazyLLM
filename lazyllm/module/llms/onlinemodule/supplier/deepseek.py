@@ -26,3 +26,11 @@ class DeepSeekChat(OnlineChatModuleBase):
 
     def _get_system_prompt(self):
         return 'You are an intelligent assistant developed by China\'s DeepSeek. You are a helpful assistanti.'
+
+    def _prepare_request_data(self, data):
+        data = dict(data)
+        if data.get('stream'):
+            stream_options = dict(data.get('stream_options') or {})
+            stream_options.setdefault('include_usage', True)
+            data['stream_options'] = stream_options
+        return data
