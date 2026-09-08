@@ -11,7 +11,12 @@ from ..data_models.revision import PatchSet
 from ..data_models.task import InputResource, TargetDocument, WritingTask
 from ..data_models.writer_ir import WriterDocument, WriterStage
 from ..prompts.profile_resources import RESOURCE_PROFILE_PROMPT
-from ..provider import get_writer_provider, match_writer_provider
+from ..provider import (
+    WriterProviderWriteOutcomeError,
+    get_writer_provider,
+    is_ambiguous_write_error,
+    match_writer_provider,
+)
 from ..utils import make_markdown_tool_result
 
 _WRITER_STAGE_ADAPTER = TypeAdapter(WriterStage)
@@ -317,11 +322,18 @@ class WriterResourceTools(WriterToolBase):
         provider = self._writer_provider(target, source_document)
         provider_key = provider.provider
         provider.require_capability(mode)
-        result = (
-            provider.replace_document(source, target, media_assets=media_library)
-            if mode == 'replace'
-            else provider.append_document(source, target, media_assets=media_library)
-        )
+        try:
+            result = (
+                provider.replace_document(source, target, media_assets=media_library)
+                if mode == 'replace'
+                else provider.append_document(source, target, media_assets=media_library)
+            )
+        except WriterProviderWriteOutcomeError:
+            raise
+        except Exception as exc:
+            if is_ambiguous_write_error(exc):
+                raise WriterProviderWriteOutcomeError(provider.provider, mode) from exc
+            raise
         return self._save_write_result(
             str(result.get('doc_id') or ''),
             str(result.get('adapter') or provider_key),
@@ -347,12 +359,19 @@ class WriterResourceTools(WriterToolBase):
         target = self._unified_optional_model(target_document, TargetDocument) or TargetDocument()
         provider = self._writer_provider(target, source)
         provider.require_capability('patch')
-        result = provider.apply_patch_to_document(
-            patch,
-            source,
-            target,
-            media_assets=media_library,
-        )
+        try:
+            result = provider.apply_patch_to_document(
+                patch,
+                source,
+                target,
+                media_assets=media_library,
+            )
+        except WriterProviderWriteOutcomeError:
+            raise
+        except Exception as exc:
+            if is_ambiguous_write_error(exc):
+                raise WriterProviderWriteOutcomeError(provider.provider, 'patch') from exc
+            raise
         patch_result = result['patch_result']
         persisted_document = result['persisted_document']
         protocol = str(result.get('provider') or self._provider_key(target, source) or '')

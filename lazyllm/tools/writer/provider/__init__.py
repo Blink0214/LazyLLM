@@ -3,6 +3,11 @@ from .base import (
     WriterProviderCapabilities,
     WriterProviderCapability,
     WriterProviderCapabilityError,
+    WriterProviderDocument,
+    WriterProviderRevisionError,
+    WriterProviderWriteMode,
+    WriterProviderWriteOutcomeError,
+    is_ambiguous_write_error,
 )
 from .feishu import FeishuWriterProvider
 from .github import GitHubWriterProvider
@@ -31,6 +36,11 @@ __all__ = [
     'WriterProviderCapabilities',
     'WriterProviderCapability',
     'WriterProviderCapabilityError',
+    'WriterProviderDocument',
+    'WriterProviderRevisionError',
+    'WriterProviderWriteMode',
+    'WriterProviderWriteOutcomeError',
+    'is_ambiguous_write_error',
     'get_writer_provider',
     'match_writer_provider',
     'register_writer_provider',

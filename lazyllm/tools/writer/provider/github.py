@@ -14,7 +14,12 @@ from ...fs.supplier.github import GitHubFSError, GitHubRepoFS, GitHubWikiFS
 from ..data_models.multimodal import MediaAssetLibrary
 from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
-from .base import WriterProviderBase, WriterProviderCapabilities
+from .base import (
+    WriterProviderBase,
+    WriterProviderCapabilities,
+    WriterProviderDocument,
+    WriterProviderWriteMode,
+)
 
 _GITHUB_REPO_URL_RE = re.compile(
     r'^https?://(?:www\.)?github\.com/[^/]+/[^/]+/blob/.+\.(?:md|markdown)(?:[?#].*)?$',
@@ -397,6 +402,30 @@ class GitHubWriterProvider(WriterProviderBase):
         resolved = fs.resolve_target(locator)
         return self._load_resolved_document(target, resolved, fs.read_bytes)
 
+    def convert_document(
+        self,
+        content: WriterDocument | str,
+        *,
+        target: TargetDocument | None = None,
+        media_assets: MediaAssetLibrary | None = None,
+    ) -> WriterProviderDocument:
+        if not isinstance(content, str):
+            raise TypeError('GitHub Writer Provider accepts final Markdown, not WriterDocument IR.')
+        source = self._writer_document(content, media_assets)
+        return WriterProviderDocument(
+            provider=self.provider,
+            format='markdown',
+            content=content,
+            source_document=source,
+        )
+
+    def prepare_markdown_for_editor(
+        self,
+        markdown: str,
+        target: TargetDocument,
+    ) -> str:
+        return self.normalize_code_fences_for_writer(markdown, target)
+
     def _load_resolved_document(
         self,
         target: TargetDocument,
@@ -588,17 +617,25 @@ class GitHubWriterProvider(WriterProviderBase):
         planned = fs.resolve_create_parent(parent_uri)
         return self._target_from_resolved(planned)
 
-    def replace_document(
+    def write_document(
         self,
-        content: WriterDocument | str,
+        converted: WriterProviderDocument,
         target: TargetDocument,
         *,
         media_assets: MediaAssetLibrary | None = None,
+        mode: WriterProviderWriteMode = 'replace',
     ) -> dict:
-        if isinstance(content, WriterDocument):
-            raise TypeError('GitHub Writer Provider accepts final Markdown, not WriterDocument IR.')
-        if not isinstance(content, str):
-            raise TypeError('GitHub Writer Provider content must be a Markdown string.')
+        if converted.provider != self.provider or converted.format != 'markdown':
+            raise ValueError('GitHub write_document requires converted GitHub Markdown.')
+        if not isinstance(converted.content, str):
+            raise TypeError('Converted GitHub content must be a Markdown string.')
+        content = converted.content
+        if mode == 'append':
+            loaded = self.load_document(target)
+            current = str(loaded['source_document'])
+            target = TargetDocument.model_validate(loaded['target_document'])
+            separator = '' if not current or current.endswith('\n') else '\n'
+            content = f'{current}{separator}{content}'
         target_type = self._target_type(target)
         fs = self._fs(target_type)
         if target.meta.get('create_pending'):
@@ -664,23 +701,6 @@ class GitHubWriterProvider(WriterProviderBase):
             'block_count': 1,
             'warnings': list(result.get('warnings') or []),
         }
-
-    def append_document(
-        self,
-        content: WriterDocument | str,
-        target: TargetDocument,
-        *,
-        media_assets: MediaAssetLibrary | None = None,
-    ) -> dict:
-        if isinstance(content, WriterDocument):
-            raise TypeError('GitHub Writer Provider accepts final Markdown, not WriterDocument IR.')
-        loaded = self.load_document(target)
-        current = str(loaded['source_document'])
-        resolved_target = TargetDocument.model_validate(loaded['target_document'])
-        separator = '' if not current or current.endswith('\n') else '\n'
-        return self.replace_document(
-            f'{current}{separator}{content}', resolved_target, media_assets=media_assets,
-        )
 
     @staticmethod
     def _merge_target(target: TargetDocument, resolved: Mapping[str, object]) -> TargetDocument:

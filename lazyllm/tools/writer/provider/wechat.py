@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 from collections.abc import Callable, Iterable
+from html import escape
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,14 @@ from ..data_models.revision import PatchSet
 from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
 from ..tools.revision_tools import apply_patch_to_ir
-from ..utils import parse_document_markdown
-from .base import WriterProviderBase, WriterProviderCapabilities
+from .base import (
+    WriterProviderBase,
+    WriterProviderCapabilities,
+    WriterProviderCapabilityError,
+    WriterProviderDocument,
+    WriterProviderRevisionError,
+    WriterProviderWriteMode,
+)
 
 _MP_HOME = 'https://mp.weixin.qq.com/'
 _DRAFT_TITLE_NOT_FOUND = (
@@ -411,22 +418,58 @@ class WeChatWriterProvider(WriterProviderBase):
             ))
         return resources, warnings
 
-    def replace_document(
+    def convert_document(
         self,
         content: WriterDocument | str,
+        *,
+        target: TargetDocument | None = None,
+        media_assets: MediaAssetLibrary | None = None,
+    ) -> WriterProviderDocument:
+        document = self._writer_document(content, media_assets)
+        media_references: dict[str, str] = {}
+        for block in document.iter_blocks():
+            if block.type != 'image' or WeChatWriterAdapter.can_reuse_raw(block):
+                continue
+            reference = next((
+                item for item in block.references
+                if item.get('type') == 'media_asset' and item.get('id')
+            ), None)
+            asset_id = str((reference or {}).get('id') or '')
+            asset = media_assets.assets.get(asset_id) if media_assets and asset_id else None
+            url = str(
+                (reference or {}).get('url')
+                or (reference or {}).get('path')
+                or (asset.uri if asset else '')
+                or (asset.local_path if asset else '')
+            ).strip()
+            if not asset_id or not url:
+                raise ValueError(f'Image block {block.node_id!r} media is unavailable.')
+            media_references[asset_id] = url
+        html = WeChatWriterAdapter().document_to_html(document, media_references)
+        if len(html) > 20_000 or len(html.encode('utf-8')) > 1024 * 1024:
+            raise ValueError('WeChat draft HTML exceeds the platform content limit.')
+        return WriterProviderDocument(
+            provider=self.provider,
+            format='html',
+            content=html,
+            source_document=document,
+            media_references=media_references,
+        )
+
+    def write_document(
+        self,
+        converted: WriterProviderDocument,
         target: TargetDocument,
         *,
         media_assets: MediaAssetLibrary | None = None,
+        mode: WriterProviderWriteMode = 'replace',
     ) -> dict:
+        if converted.provider != self.provider or converted.format != 'html':
+            raise ValueError('WeChat write_document requires converted WeChat HTML.')
+        if mode != 'replace':
+            raise WriterProviderCapabilityError(self.provider, 'append')
         target = self._normalize_target(target)
-        document = content.model_copy(deep=True) if isinstance(content, WriterDocument) else (
-            parse_document_markdown(
-                content,
-                document_id='writer-wechat-draft',
-                stage='final',
-                media_assets=media_assets,
-            )
-        )
+        document = converted.source_document.model_copy(deep=True)
         title = document.title.strip() or str(target.title or '').strip()
         if not title:
             raise ValueError('WeChat draft title is required.')
@@ -436,6 +479,11 @@ class WeChatWriterProvider(WriterProviderBase):
         image_urls = {
             asset_id: client.upload_body_image(path) for asset_id, path in image_assets
         }
+        html = str(converted.content)
+        for asset_id, uploaded_url in image_urls.items():
+            source_url = converted.media_references.get(asset_id, '')
+            if source_url:
+                html = html.replace(escape(source_url, quote=True), uploaded_url)
         existing_binding = document.provider_binding if (
             document.provider_binding.get('provider') == self.provider
         ) else {}
@@ -471,9 +519,6 @@ class WeChatWriterProvider(WriterProviderBase):
                     thumb_media_id = client.upload_cover(
                         'lazymind-cover.png', wechat_placeholder_cover_png(), 'image/png')
 
-        html = WeChatWriterAdapter().document_to_html(document, image_urls)
-        if len(html) > 20_000 or len(html.encode('utf-8')) > 1024 * 1024:
-            raise ValueError('WeChat draft HTML exceeds the platform content limit.')
         previous_article = document.metadata.get('wechat_article')
         article = {
             key: value for key, value in (previous_article.items() if isinstance(previous_article, dict) else [])
@@ -523,15 +568,6 @@ class WeChatWriterProvider(WriterProviderBase):
             'representation': 'ir',
         }
 
-    def append_document(
-        self,
-        content: WriterDocument | str,
-        target: TargetDocument,
-        *,
-        media_assets: MediaAssetLibrary | None = None,
-    ) -> dict:
-        raise NotImplementedError('WeChat drafts only support full-document replacement.')
-
     def apply_patch_to_document(
         self,
         patch_set: PatchSet,
@@ -553,9 +589,10 @@ class WeChatWriterProvider(WriterProviderBase):
         if current_revision is None:
             current_revision = baseline.get('updateTime')
         if str(current_revision) != source_document.revision:
-            raise RuntimeError(
-                f'WeChat draft changed since it was loaded: expected '
-                f'{source_document.revision!r}, got {str(current_revision)!r}.'
+            raise WriterProviderRevisionError(
+                self.provider,
+                source_document.revision,
+                str(current_revision) if current_revision is not None else None,
             )
         revised, patch_result = apply_patch_to_ir(
             source_document, patch_set, media_assets=media_assets)

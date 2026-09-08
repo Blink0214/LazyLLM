@@ -719,19 +719,21 @@ class FeishuWriterAdapter(WriterAdapterBase):
             raise ValueError('A new image block requires exactly one media_asset reference.')
         asset_id = str(references[0]['id'])
         asset = media_assets.assets.get(asset_id) if media_assets else None
-        if asset is None or not asset.local_path or not Path(asset.local_path).is_file():
+        local_path = Path(asset.local_path) if asset and asset.local_path else None
+        if asset is None or (not asset.uri and (local_path is None or not local_path.is_file())):
             raise ValueError(f'Image media asset {asset_id!r} is unavailable.')
+        media = {'media_asset_id': asset_id}
+        if asset.uri:
+            media['uri'] = asset.uri
+        if local_path is not None and local_path.is_file():
+            media.update(local_path=str(local_path), file_name=local_path.name)
         return {
             'block_type': 27,
             'image': {
                 'align': 2,
                 'caption': {'content': block.content},
             },
-            '_media': {
-                'media_asset_id': asset_id,
-                'local_path': asset.local_path,
-                'file_name': Path(asset.local_path).name,
-            },
+            '_media': media,
         }
 
     def _block_type_from_ir(self, block: WriterBlock, original_type: Any) -> int:

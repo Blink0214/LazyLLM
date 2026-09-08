@@ -18,7 +18,7 @@ from lazyllm.tools.writer.provider.wechat import (
     WeChatClient,
     WeChatWriterProvider,
 )
-from lazyllm.tools.writer.provider import match_writer_provider
+from lazyllm.tools.writer.provider import WriterProviderRevisionError, match_writer_provider
 from lazyllm.tools.writer.tools.resource_tools import WriterResourceTools
 from lazyllm.tools.writer.utils.artifact import deserialize_artifact_json
 
@@ -392,7 +392,9 @@ def test_wechat_patch_rejects_stale_remote_revision(monkeypatch):
     document = provider.load_document(target)['source_document']
     changed = document.blocks[0].model_copy(update={'content': '修改后的正文'})
 
-    with pytest.raises(RuntimeError, match='changed since it was loaded'):
+    with pytest.raises(
+        WriterProviderRevisionError, match='changed since it was loaded',
+    ) as captured:
         provider.apply_patch_to_document(
             PatchSet(
                 target_doc_id=document.document_id,
@@ -405,6 +407,13 @@ def test_wechat_patch_rejects_stale_remote_revision(monkeypatch):
             document,
             target,
         )
+
+    assert captured.value.code == 'REVISION_CONFLICT'
+    assert captured.value.details == {
+        'provider': 'wechat',
+        'expected_revision': '123',
+        'actual_revision': '124',
+    }
 
 
 def test_wechat_writeback_renumbers_unchanged_heading_after_delete():

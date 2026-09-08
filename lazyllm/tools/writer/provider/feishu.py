@@ -7,7 +7,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lazyllm import LOG
 
-from .base import WriterProviderBase, WriterProviderCapabilities
+from .base import (
+    WriterProviderBase,
+    WriterProviderCapabilities,
+    WriterProviderDocument,
+    WriterProviderWriteMode,
+)
 from ..adapter.base import NativePatchOperation, WriterAdapterBase
 from ..adapter.feishu import FeishuWriterAdapter, feishu_block_url
 from ..data_models.multimodal import MediaAssetLibrary
@@ -21,7 +26,7 @@ from ..numbering import (
     materialize_ir,
 )
 from ..tools.revision_tools import apply_patch_to_ir
-from ..utils import parse_document_markdown, strip_heading_numbering
+from ..utils import strip_heading_numbering
 
 
 _FEISHU_URL_RE = re.compile(
@@ -199,60 +204,73 @@ class FeishuWriterProvider(WriterProviderBase):
             raise TypeError(f'{type(fs).__name__} does not support Feishu media downloads.')
         return download_media(token)
 
-    def replace_document(
+    def convert_document(
         self,
         content: WriterDocument | str,
-        target: TargetDocument,
         *,
+        target: TargetDocument | None = None,
         media_assets: MediaAssetLibrary | None = None,
-    ) -> dict:
-        return self._write_document(
-            content, target, media_assets=media_assets, mode='replace')
-
-    def append_document(
-        self,
-        content: WriterDocument | str,
-        target: TargetDocument,
-        *,
-        media_assets: MediaAssetLibrary | None = None,
-    ) -> dict:
-        return self._write_document(
-            content, target, media_assets=media_assets, mode='append')
-
-    def _write_document(
-        self,
-        content: WriterDocument | str,
-        target: TargetDocument,
-        *,
-        media_assets: MediaAssetLibrary | None,
-        mode: str,
-    ) -> dict:
-        source_document = content if isinstance(content, WriterDocument) else None
-        protocol, _, fs, adapter, locator, document_id = \
-            self._resolve_document_target(target, source_document=source_document)
-        document = source_document or parse_document_markdown(
-            content,
-            document_id=adapter.make_document_id(document_id),
-            stage='final',
-            media_assets=media_assets,
+    ) -> WriterProviderDocument:
+        source_document = self._writer_document(content, media_assets)
+        document = source_document.model_copy(deep=True)
+        if target is not None:
+            if target.adapter and target.adapter != self.provider:
+                raise ValueError(
+                    f'target adapter {target.adapter!r} does not match provider {self.provider!r}.')
+            document.provider_binding = {
+                **document.provider_binding,
+                'provider': self.provider,
+                'document_id': str(target.doc_id or ''),
+                'uri': str(target.uri or ''),
+            }
+        numbering = compute_numbering(build_numbering_view_from_ir(document))
+        document = materialize_ir(document, numbering)
+        native_blocks = self._writer_adapter().ir_to_blocks(
+            document, media_assets=media_assets,
         )
-        document.provider_binding = {
-            **(document.provider_binding or {}),
+        return WriterProviderDocument(
+            provider=self.provider,
+            format='feishu_blocks',
+            content=self._copyable_media_content(native_blocks, media_assets),
+            source_document=source_document,
+            media_references={
+                asset_id: str(asset.uri or asset.local_path or '')
+                for asset_id, asset in (media_assets.assets.items() if media_assets else [])
+                if asset.uri or asset.local_path
+            },
+        )
+
+    def write_document(
+        self,
+        converted: WriterProviderDocument,
+        target: TargetDocument,
+        *,
+        media_assets: MediaAssetLibrary | None = None,
+        mode: WriterProviderWriteMode = 'replace',
+    ) -> dict:
+        if converted.provider != self.provider or converted.format != 'feishu_blocks':
+            raise ValueError('Feishu write_document requires converted Feishu blocks.')
+        source_document = converted.source_document.model_copy(deep=True)
+        protocol, _, fs, _, locator, document_id = \
+            self._resolve_document_target(target, source_document=source_document)
+        source_document.provider_binding = {
+            **source_document.provider_binding,
             'provider': protocol,
             'document_id': document_id,
             'uri': locator,
         }
         warnings: List[str] = []
-        self._validate_available_images(document, media_assets)
-        numbering = compute_numbering(build_numbering_view_from_ir(document))
-        document = materialize_ir(document, numbering)
         method_name = 'replace_doc_blocks' if mode == 'replace' else 'write_doc_blocks'
         write_blocks = getattr(fs, method_name, None)
         if not callable(write_blocks):
             raise TypeError(f'{type(fs).__name__} does not support {method_name}().')
-        native_blocks = adapter.ir_to_blocks(document, media_assets=media_assets)
-        if document.title:
-            self._update_document_title(fs, document_id, document.title, document.revision)
+        native_blocks = self._writable_media_content(converted.content, media_assets)
+        if not isinstance(native_blocks, list):
+            raise TypeError('Converted Feishu content must be a block list.')
+        if source_document.title:
+            self._update_document_title(
+                fs, document_id, source_document.title, source_document.revision,
+            )
         if not native_blocks:
             warnings.append('Document has no publishable blocks.')
         else:
