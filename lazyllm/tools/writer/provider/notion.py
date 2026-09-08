@@ -364,7 +364,10 @@ class NotionWriterProvider(WriterProviderBase):
             'document_id': document_id,
             'uri': locator,
         }
-        native_blocks = self._writable_media_content(converted.content, media_assets)
+        converted_content = self._writer_adapter().materialize_internal_links(
+            converted.content, document_uri=locator, document_id=document_id,
+        )
+        native_blocks = self._writable_media_content(converted_content, media_assets)
         if not isinstance(native_blocks, list):
             raise TypeError('Converted Notion content must be a block list.')
         if source_document.title:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from ..utils.feishu_docx import DOCX_BLOCK_TYPE_FIELDS, prepare_docx_descendants
 from ..utils import strip_caption_numbering, strip_heading_numbering
@@ -234,6 +234,35 @@ class FeishuWriterAdapter(WriterAdapterBase):
             else:
                 raw.pop('parent_id', None)
             output.append(raw)
+        return output
+
+    @staticmethod
+    def materialize_internal_links(
+        blocks: List[NativeBlock], *, document_uri: str, document_id: str,
+    ) -> List[NativeBlock]:
+        output = deepcopy(blocks)
+        temporary_ids = {
+            str(block.get('block_id') or '')
+            for block in output
+            if isinstance(block, dict) and block.get('block_id')
+        }
+
+        def visit(value: Any) -> None:
+            if isinstance(value, list):
+                for item in value:
+                    visit(item)
+                return
+            if not isinstance(value, dict):
+                return
+            link = value.get('link')
+            url = link.get('url') if isinstance(link, dict) else None
+            fragment = urlparse(url).fragment if isinstance(url, str) else ''
+            if fragment in temporary_ids:
+                link['url'] = feishu_block_url(document_uri, document_id, fragment)
+            for item in value.values():
+                visit(item)
+
+        visit(output)
         return output
 
     def patch_to_operation(

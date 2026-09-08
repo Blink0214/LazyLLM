@@ -153,6 +153,30 @@ class NotionWriterAdapter(WriterAdapterBase):
             track_internal_refs=track_internal_refs,
         )
 
+    @classmethod
+    def materialize_internal_links(
+        cls, blocks: List[NativeBlock], *, document_uri: str, document_id: str,
+    ) -> List[NativeBlock]:
+        output = deepcopy(blocks)
+        target_url = cls._notion_block_url(document_uri, document_id, document_id)
+
+        def visit(value: Any) -> None:
+            if isinstance(value, list):
+                for item in value:
+                    visit(item)
+                return
+            if not isinstance(value, dict):
+                return
+            text = value.get('text')
+            link = text.get('link') if isinstance(text, dict) else None
+            if isinstance(link, dict) and link.get('_target_node_id'):
+                link['url'] = target_url
+            for item in value.values():
+                visit(item)
+
+        visit(output)
+        return output
+
     def _ir_blocks_to_raw(self, blocks: List[WriterBlock], resolve_internal_ref: Any, *,
                           media_library: Optional[MediaAssetLibrary] = None,
                           track_internal_refs: bool = False) -> List[NativeBlock]:

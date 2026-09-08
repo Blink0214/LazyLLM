@@ -259,12 +259,15 @@ class FeishuWriterProvider(WriterProviderBase):
             'document_id': document_id,
             'uri': locator,
         }
+        converted_content = self._writer_adapter().materialize_internal_links(
+            converted.content, document_uri=locator, document_id=document_id,
+        )
         warnings: List[str] = []
         method_name = 'replace_doc_blocks' if mode == 'replace' else 'write_doc_blocks'
         write_blocks = getattr(fs, method_name, None)
         if not callable(write_blocks):
             raise TypeError(f'{type(fs).__name__} does not support {method_name}().')
-        native_blocks = self._writable_media_content(converted.content, media_assets)
+        native_blocks = self._writable_media_content(converted_content, media_assets)
         if not isinstance(native_blocks, list):
             raise TypeError('Converted Feishu content must be a block list.')
         if source_document.title:

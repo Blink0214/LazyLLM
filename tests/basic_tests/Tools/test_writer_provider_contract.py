@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,6 +10,7 @@ from lazyllm.tools.writer.data_models import (
     TargetDocument,
     WriterBlock,
     WriterDocument,
+    WriterSpan,
 )
 from lazyllm.tools.writer.provider import (
     FeishuWriterProvider,
@@ -150,6 +152,70 @@ def test_native_block_conversion_keeps_copyable_image_url(provider):
     assert converted.media_references == {
         'asset-1': 'https://example.test/image.png',
     }
+
+
+@pytest.mark.parametrize(
+    ('provider', 'target', 'document_id', 'expected_url'),
+    [
+        (
+            FeishuWriterProvider(),
+            TargetDocument(
+                adapter='feishu',
+                uri='https://example.feishu.cn/docx/target-document',
+            ),
+            'target-document',
+            'https://example.feishu.cn/docx/target-document#target-heading',
+        ),
+        (
+            NotionWriterProvider(),
+            TargetDocument(
+                adapter='notion',
+                uri='https://www.notion.so/Target-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            ),
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            'https://www.notion.so/Target-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            '#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ),
+    ],
+)
+def test_native_write_materializes_internal_links_against_resolved_target(
+        monkeypatch, provider, target, document_id, expected_url):
+    document = WriterDocument(
+        document_id='writer-document',
+        stage='final',
+        title='Document',
+        blocks=[
+            WriterBlock(
+                node_id='target-heading', type='heading', numbering={'level': 1},
+                content='Target', stage='final',
+            ),
+            WriterBlock(
+                node_id='reference', type='paragraph', content='See target', stage='final',
+                spans=[WriterSpan(text='See target', style={'link': {
+                    'type': 'internal_ref',
+                    'target_node_id': 'target-heading',
+                }})],
+            ),
+        ],
+    )
+    converted = provider.convert_document(document)
+    fs = MagicMock()
+    monkeypatch.setattr(provider, '_resolve_document_target', lambda *_args, **_kwargs: (
+        provider.provider,
+        f'/~document/{document_id}',
+        fs,
+        provider._writer_adapter(),
+        target.uri,
+        document_id,
+    ))
+
+    provider.write_document(converted, target)
+
+    written_blocks = fs.replace_doc_blocks.call_args.args[1]
+    serialized = json.dumps(written_blocks)
+    assert expected_url in serialized
+    assert 'https://www.notion.so/#' not in serialized
+    assert 'https://feishu.cn/docx/#' not in serialized
 
 
 def test_legacy_replace_composes_the_two_provider_stages(monkeypatch):
