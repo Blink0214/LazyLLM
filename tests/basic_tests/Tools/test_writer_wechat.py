@@ -3,6 +3,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageChops
+import pytest
 
 from lazyllm.tools.writer.adapter.wechat import WeChatWriterAdapter
 from lazyllm.tools.writer.data_models.multimodal import MediaAsset, MediaAssetLibrary
@@ -362,6 +363,48 @@ def test_wechat_draft_read_patch_write_preserves_untouched_html(monkeypatch):
     ) in article['content']
     assert '<table data-layout="custom"><tr><th>A</th><th>B</th></tr>' in article['content']
     assert result['persisted_document'].provider_binding['article_index'] == 1
+
+
+def test_wechat_patch_rejects_stale_remote_revision(monkeypatch):
+    calls = {'reads': 0}
+
+    class Client:
+        def __init__(self, token):
+            assert token == 'stable-token'
+
+        def get_draft(self, media_id):
+            calls['reads'] += 1
+            return {
+                'update_time': 124 if calls['reads'] > 1 else 123,
+                'news_item': [{
+                    'title': '目标文章',
+                    'content': '<p>原始正文</p>',
+                    'thumb_media_id': 'cover-1',
+                }],
+            }
+
+        def update_draft(self, media_id, article, *, index=0):
+            raise AssertionError('stale source must not be written')
+
+    _patch_wechat_client(monkeypatch, Client)
+    provider = WeChatWriterProvider()
+    target = TargetDocument(adapter='wechat', doc_id='media-1')
+    document = provider.load_document(target)['source_document']
+    changed = document.blocks[0].model_copy(update={'content': '修改后的正文'})
+
+    with pytest.raises(RuntimeError, match='changed since it was loaded'):
+        provider.apply_patch_to_document(
+            PatchSet(
+                target_doc_id=document.document_id,
+                hunks=[PatchHunk(
+                    target_node_id=changed.node_id,
+                    modify_type='update',
+                    block=changed,
+                )],
+            ),
+            document,
+            target,
+        )
 
 
 def test_wechat_writeback_renumbers_unchanged_heading_after_delete():

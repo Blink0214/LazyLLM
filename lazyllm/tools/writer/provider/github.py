@@ -14,7 +14,7 @@ from ...fs.supplier.github import GitHubFSError, GitHubRepoFS, GitHubWikiFS
 from ..data_models.multimodal import MediaAssetLibrary
 from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
-from .base import WriterProviderBase
+from .base import WriterProviderBase, WriterProviderCapabilities
 
 _GITHUB_REPO_URL_RE = re.compile(
     r'^https?://(?:www\.)?github\.com/[^/]+/[^/]+/blob/.+\.(?:md|markdown)(?:[?#].*)?$',
@@ -320,6 +320,14 @@ class GitHubWriterProvider(WriterProviderBase):
     """Keep GitHub repository and Wiki Writer documents as native Markdown."""
 
     provider = 'github'
+    capabilities = WriterProviderCapabilities(
+        load=True,
+        create=True,
+        replace=True,
+        append=True,
+        revision_check=True,
+        media=True,
+    )
 
     @classmethod
     def matches(cls, locator: str) -> bool:

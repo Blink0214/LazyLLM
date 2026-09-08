@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from lazyllm import LOG
 
-from .base import WriterProviderBase
+from .base import WriterProviderBase, WriterProviderCapabilities
 from ..adapter.base import NativePatchOperation, WriterAdapterBase
 from ..adapter.feishu import FeishuWriterAdapter, feishu_block_url
 from ..data_models.multimodal import MediaAssetLibrary
@@ -34,6 +34,15 @@ class FeishuWriterProvider(WriterProviderBase):
     '''Orchestrate Feishu document IO and structured Writer conversion.'''
 
     provider = 'feishu'
+    capabilities = WriterProviderCapabilities(
+        load=True,
+        create=True,
+        replace=True,
+        append=True,
+        patch=True,
+        revision_check=True,
+        media=True,
+    )
 
     @classmethod
     def matches(cls, locator: str) -> bool:

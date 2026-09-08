@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from ..data_models.multimodal import MediaAssetLibrary
 from ..data_models.revision import PatchSet
@@ -8,13 +11,50 @@ from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
 
 
+WriterProviderCapability = Literal[
+    'load', 'create', 'replace', 'append', 'patch', 'revision_check', 'media',
+]
+
+
+class WriterProviderCapabilities(BaseModel):
+    model_config = ConfigDict(extra='forbid', frozen=True)
+
+    load: bool = False
+    create: bool = False
+    replace: bool = False
+    append: bool = False
+    patch: bool = False
+    revision_check: bool = False
+    media: bool = False
+
+
+class WriterProviderCapabilityError(RuntimeError):
+    code = 'PROVIDER_CAPABILITY_UNSUPPORTED'
+    retryable = False
+
+    def __init__(self, provider: str, capability: WriterProviderCapability):
+        self.provider = provider
+        self.capability = capability
+        super().__init__(provider, capability)
+
+    def __str__(self) -> str:
+        return f'Writer provider {self.provider!r} does not support {self.capability!r}.'
+
+
 class WriterProviderBase(ABC):
     '''Read and persist Writer content through one external document provider.'''
 
     provider: str = ''
+    capabilities = WriterProviderCapabilities()
 
     def __init__(self, adapters=None):
         self.adapters = adapters or {}
+
+    def require_capability(self, capability: WriterProviderCapability) -> None:
+        if not getattr(self.capabilities, capability):
+            raise WriterProviderCapabilityError(
+                self.provider or type(self).__name__, capability,
+            )
 
     @classmethod
     @abstractmethod
@@ -93,4 +133,9 @@ class WriterProviderBase(ABC):
             f'{self.provider or type(self).__name__} does not support structured patches.')
 
 
-__all__ = ['WriterProviderBase']
+__all__ = [
+    'WriterProviderBase',
+    'WriterProviderCapabilities',
+    'WriterProviderCapability',
+    'WriterProviderCapabilityError',
+]

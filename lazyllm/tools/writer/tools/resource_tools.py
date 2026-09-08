@@ -130,7 +130,9 @@ class WriterResourceTools(WriterToolBase):
             stage = _WRITER_STAGE_ADAPTER.validate_python(target.meta.get('stage', 'final'))
         except ValidationError as exc:
             raise ValueError('target_document.meta.stage must be a valid WriterStage') from exc
-        loaded = self._writer_provider(target).load_document(target, stage=stage)
+        provider = self._writer_provider(target)
+        provider.require_capability('load')
+        loaded = provider.load_document(target, stage=stage)
         document = loaded.get('source_document')
         if loaded.get('representation') != 'ir' or not isinstance(document, WriterDocument):
             raise TypeError(
@@ -158,7 +160,9 @@ class WriterResourceTools(WriterToolBase):
             stage = _WRITER_STAGE_ADAPTER.validate_python(target.meta.get('stage', 'final'))
         except ValidationError as exc:
             raise ValueError('target_document.meta.stage must be a valid WriterStage') from exc
-        loaded = self._writer_provider(target).load_document(target, stage=stage)
+        writer_provider = self._writer_provider(target)
+        writer_provider.require_capability('load')
+        loaded = writer_provider.load_document(target, stage=stage)
         representation = str(loaded.get('representation') or '').strip().lower()
         source = loaded.get('source_document')
         resolved_target = self._unified_model(
@@ -249,7 +253,7 @@ class WriterResourceTools(WriterToolBase):
         self,
         title: str,
         parent_uri: str = '',
-        adapter: str = 'feishu',
+        adapter: str = '',
     ) -> dict:
         '''Create an empty provider document and return its normalized target artifact.'''
         title = (title or '').strip()
@@ -258,8 +262,9 @@ class WriterResourceTools(WriterToolBase):
         adapter = (adapter or '').strip().lower()
         if not adapter:
             raise ValueError('adapter is required')
-        target = get_writer_provider(adapter, adapters=self.adapters).create_document(
-            title, parent_uri)
+        provider = get_writer_provider(adapter, adapters=self.adapters)
+        provider.require_capability('create')
+        target = provider.create_document(title, parent_uri)
         document_id = str(target.doc_id or '')
         return self._save_artifacts(
             {'target_document': target},
@@ -311,6 +316,7 @@ class WriterResourceTools(WriterToolBase):
         media_library = self._unified_optional_model(media_assets, MediaAssetLibrary)
         provider = self._writer_provider(target, source_document)
         provider_key = provider.provider
+        provider.require_capability(mode)
         result = (
             provider.replace_document(source, target, media_assets=media_library)
             if mode == 'replace'
@@ -340,6 +346,7 @@ class WriterResourceTools(WriterToolBase):
         media_library = self._unified_optional_model(media_assets, MediaAssetLibrary)
         target = self._unified_optional_model(target_document, TargetDocument) or TargetDocument()
         provider = self._writer_provider(target, source)
+        provider.require_capability('patch')
         result = provider.apply_patch_to_document(
             patch,
             source,

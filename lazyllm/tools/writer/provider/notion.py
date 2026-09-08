@@ -7,7 +7,7 @@ from typing import Any, List, Optional, Tuple
 
 from lazyllm import LOG
 
-from .base import WriterProviderBase
+from .base import WriterProviderBase, WriterProviderCapabilities
 from ..adapter.base import NativePatchOperation, WriterAdapterBase
 from ..adapter.notion import NotionWriterAdapter
 from ..data_models.multimodal import MediaAssetLibrary
@@ -29,6 +29,15 @@ class NotionWriterProvider(WriterProviderBase):
     '''Orchestrate structured Notion page IO through NotionFS and Writer IR.'''
 
     provider = 'notion'
+    capabilities = WriterProviderCapabilities(
+        load=True,
+        create=True,
+        replace=True,
+        append=True,
+        patch=True,
+        revision_check=True,
+        media=True,
+    )
 
     @classmethod
     def matches(cls, locator: str) -> bool:

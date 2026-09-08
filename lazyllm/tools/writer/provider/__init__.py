@@ -1,4 +1,9 @@
-from .base import WriterProviderBase
+from .base import (
+    WriterProviderBase,
+    WriterProviderCapabilities,
+    WriterProviderCapability,
+    WriterProviderCapabilityError,
+)
 from .feishu import FeishuWriterProvider
 from .github import GitHubWriterProvider
 from .notion import NotionWriterProvider
@@ -23,6 +28,9 @@ __all__ = [
     'NotionWriterProvider',
     'WeChatWriterProvider',
     'WriterProviderBase',
+    'WriterProviderCapabilities',
+    'WriterProviderCapability',
+    'WriterProviderCapabilityError',
     'get_writer_provider',
     'match_writer_provider',
     'register_writer_provider',

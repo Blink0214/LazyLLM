@@ -18,7 +18,7 @@ from ..data_models.task import InputResource, TargetDocument
 from ..data_models.writer_ir import WriterDocument, WriterStage
 from ..tools.revision_tools import apply_patch_to_ir
 from ..utils import parse_document_markdown
-from .base import WriterProviderBase
+from .base import WriterProviderBase, WriterProviderCapabilities
 
 _MP_HOME = 'https://mp.weixin.qq.com/'
 _DRAFT_TITLE_NOT_FOUND = (
@@ -249,6 +249,14 @@ class WeChatClient:
 
 class WeChatWriterProvider(WriterProviderBase):
     provider = 'wechat'
+    capabilities = WriterProviderCapabilities(
+        load=True,
+        create=True,
+        replace=True,
+        patch=True,
+        revision_check=True,
+        media=True,
+    )
 
     @classmethod
     def matches(cls, locator: str) -> bool:
@@ -532,6 +540,23 @@ class WeChatWriterProvider(WriterProviderBase):
         *,
         media_assets: MediaAssetLibrary | None = None,
     ) -> dict:
+        target = self._normalize_target(target)
+        media_id = str(
+            target.doc_id or source_document.provider_binding.get('document_id') or ''
+        ).strip()
+        if not media_id:
+            raise ValueError('WeChat patch requires a bound draft media_id.')
+        if source_document.revision is None:
+            raise ValueError('WeChat patch requires the source document revision.')
+        baseline = WeChatClient(self._access_token()).get_draft(media_id)
+        current_revision = baseline.get('update_time')
+        if current_revision is None:
+            current_revision = baseline.get('updateTime')
+        if str(current_revision) != source_document.revision:
+            raise RuntimeError(
+                f'WeChat draft changed since it was loaded: expected '
+                f'{source_document.revision!r}, got {str(current_revision)!r}.'
+            )
         revised, patch_result = apply_patch_to_ir(
             source_document, patch_set, media_assets=media_assets)
         write_result = self.replace_document(revised, target, media_assets=media_assets)
