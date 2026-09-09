@@ -428,7 +428,7 @@ class GitHubWriterProvider(WriterProviderBase):
         resolved = fs.resolve_target(locator)
         return self._load_resolved_document(target, resolved, fs.read_bytes)
 
-    def convert_document(
+    def _convert_native_document(
         self,
         content: WriterDocument | str,
         *,
