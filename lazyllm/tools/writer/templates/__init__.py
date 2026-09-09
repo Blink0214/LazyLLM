@@ -1,4 +1,4 @@
-"""Writer rendering templates."""
+"""Bundled document templates for Writer exports."""
 
 from .wechat import (
     WECHAT_CLEAN_TEMPLATE,
