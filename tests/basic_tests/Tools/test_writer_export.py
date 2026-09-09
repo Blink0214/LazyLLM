@@ -5,6 +5,7 @@ from lazyllm.tools.writer.provider import (
     FeishuWriterProvider, GitHubWriterProvider, NotionWriterProvider,
     WeChatWriterProvider, WriterProviderBase,
 )
+from lazyllm.tools.writer.utils import export as writer_export
 
 
 @pytest.mark.parametrize('provider_class', [
@@ -26,39 +27,20 @@ def test_portable_formats_bypass_native_conversion_and_cannot_be_written(provide
             provider.write_document(converted, TargetDocument(adapter=provider.provider, doc_id='unused'))
 
 
-def test_latex_preserves_math_tables_nested_lists_and_escapes_text():
-    source = r'''# Report
+def test_latex_copy_uses_shared_markdown_to_latex_conversion(monkeypatch):
+    calls = []
 
-Cost is 50% & $x_1 + \alpha$ with **bold** and `a_b`.
+    def convert(content, source_format, target_format):
+        calls.append((content, source_format, target_format))
+        return '\\documentclass{article}\n'
 
-$$
-E = mc^2
-$$
+    monkeypatch.setattr(writer_export, 'convert_writer_content', convert)
+    result = WriterProviderBase.convert_common_document(
+        '# Report\n\nCost is 50% & $x_1$.\n', output_format='latex',
+    ).content
 
-| Name | Value |
-| --- | --- |
-| A&B | 20% |
-
-3. First
-   - Nested
-4. Second
-
-```python
-a_b = 1
-```
-'''
-    result = WriterProviderBase.convert_common_document(source, output_format='latex').content
-    assert r'50\% \& $x_1 + \alpha$' in result
-    assert '\\[\nE = mc^2\n\\]' in result
-    assert r'\textbf{bold}' in result
-    assert r'\texttt{a\_b}' in result
-    assert r'\begin{tabular}{ll}' in result
-    assert r'A\&B & 20\%' in result
-    assert r'\item[3.] First' in result
-    assert r'\item[-] Nested' in result
-    assert r'\item[4.] Second' in result
-    assert r'a\_b' in result
-    assert '\\documentclass' not in result
+    assert result == '\\documentclass{article}\n'
+    assert calls == [('# Report\nCost is 50% & $x_1$.\n', 'markdown', 'latex')]
 
 
 def test_markdown_keeps_source_math_and_plain_text_removes_markup():
@@ -125,7 +107,7 @@ def test_legacy_provider_subclass_can_still_override_convert_document():
     assert LegacyProvider().convert_document('legacy') == 'legacy'
 
 
-@pytest.mark.parametrize('output_format', ['markdown', 'latex', 'text'])
+@pytest.mark.parametrize('output_format', ['markdown', 'text'])
 def test_copy_removes_editor_anchors_and_extra_paragraph_spacing(output_format):
     source = '''# 故事
 
@@ -153,8 +135,6 @@ def test_copy_removes_editor_anchors_and_extra_paragraph_spacing(output_format):
     assert all(line.strip() for line in result.splitlines())
     assert '章节见后续内容。' in result
     assert '码头上空无一人。' in result
-    if output_format == 'latex':
-        assert '码头上空无一人。\\par\n不，不完全如此。' in result
 
 
 def test_markdown_copy_cleans_ir_anchors_without_changing_source():
