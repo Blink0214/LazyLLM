@@ -177,6 +177,43 @@ def test_bundled_templates_render(template_name, document_class, title):
     assert '\\item[\\taskchecked] completed' in result.stdout
 
 
+def test_pandoc_preserves_standard_markdown_constructs():
+    result = _run_filter(r'''# Report
+
+Cost is 50% & $x_1 + \alpha$ with **bold** and `a_b`.
+
+$$
+E = mc^2
+$$
+
+| Name | Value |
+| --- | --- |
+| A&B | 20% |
+
+3. First
+   - Nested
+4. Second
+
+```python
+a_b = 1
+```
+''')
+
+    assert result.returncode == 0, result.stderr
+    assert r'50\% \& \(x_1 + \alpha\)' in result.stdout
+    assert '\\[\nE = mc^2\n\\]' in result.stdout
+    assert r'\textbf{bold}' in result.stdout
+    assert r'\texttt{a\_b}' in result.stdout
+    assert r'\begin{longtable}' in result.stdout
+    assert result.stdout.count(r'p{(\linewidth - 2\tabcolsep) * \real{0.5000}}') == 2
+    assert r'A\&B' in result.stdout and r'20\%' in result.stdout
+    assert r'\begin{enumerate}' in result.stdout
+    assert r'\setcounter{enumi}{2}' in result.stdout
+    assert r'\begin{itemize}' in result.stdout
+    assert 'Nested' in result.stdout and 'Second' in result.stdout
+    assert r'\NormalTok{a\_b }' in result.stdout
+
+
 def test_markdown_contract_converts_objects_and_internal_references():
     source = normalize_writer_markdown_for_latex(
         '# Document title\n\n'

@@ -40,7 +40,7 @@ def test_latex_copy_uses_shared_markdown_to_latex_conversion(monkeypatch):
     ).content
 
     assert result == '\\documentclass{article}\n'
-    assert calls == [('# Report\nCost is 50% & $x_1$.\n', 'markdown', 'latex')]
+    assert calls == [('# Report\n\nCost is 50% & $x_1$.', 'markdown', 'latex')]
 
 
 def test_markdown_keeps_source_math_and_plain_text_removes_markup():
@@ -63,7 +63,10 @@ def test_ir_conversion_does_not_mutate_source_and_keeps_media_locator():
     for output_format in ('markdown', 'latex', 'text'):
         result = WriterProviderBase.convert_common_document(document, output_format=output_format)
         assert 'Section' in result.content
-        assert 'https://example.com/image.png' in result.content
+        if output_format == 'latex':
+            assert 'assets/image.png' in result.content
+        else:
+            assert 'https://example.com/image.png' in result.content
     assert document.model_dump() == before
 
 
@@ -78,11 +81,11 @@ def test_unknown_format_and_unrepresentable_block_fail_explicitly():
 
 
 def test_ir_math_is_not_escaped_as_ordinary_markdown_text():
-    document = WriterDocument(document_id='doc', blocks=[
+    document = WriterDocument(document_id='doc', title='Title', blocks=[
         WriterBlock(node_id='p', type='paragraph', content=r'Formula $x_1 + \alpha$ costs 50%'),
     ])
     result = WriterProviderBase.convert_common_document(document, output_format='latex')
-    assert r'$x_1 + \alpha$' in result.content
+    assert r'\(x_1 + \alpha\)' in result.content
     assert r'50\%' in result.content
 
 

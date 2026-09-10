@@ -296,6 +296,35 @@ local function render_code_caption(caption, label)
   )
 end
 
+-- Pandoc renders default-width Markdown columns as l/c/r columns, which do
+-- not wrap and can extend past the page. Assign the remaining line width to
+-- default columns so the LaTeX writer emits wrapping p{...} columns while
+-- retaining longtable's page-breaking behavior. Explicit source widths are
+-- preserved.
+local function constrain_table_width(block)
+  local default_count = 0
+  local explicit_width = 0
+  for _, colspec in ipairs(block.colspecs) do
+    local width = colspec[2]
+    if type(width) == 'number' and width > 0 then
+      explicit_width = explicit_width + width
+    else
+      default_count = default_count + 1
+    end
+  end
+  if default_count == 0 or explicit_width >= 1 then
+    return block
+  end
+  local default_width = (1 - explicit_width) / default_count
+  for _, colspec in ipairs(block.colspecs) do
+    local width = colspec[2]
+    if type(width) ~= 'number' or width <= 0 then
+      colspec[2] = default_width
+    end
+  end
+  return block
+end
+
 local function bind_anchor(blocks, block, id, labels, caption, declared_kind)
   local kind = target_kind(block)
   if kind == nil then
@@ -449,6 +478,7 @@ function Pandoc(doc)
       end
       return nil
     end,
+    Table = constrain_table_width,
   })
   doc = rewrite_internal_references(doc, labels)
   doc = rewrite_bibliography_citations(doc, bibliography_keys)
