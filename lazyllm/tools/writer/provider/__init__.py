@@ -15,6 +15,7 @@ from .notion import NotionWriterProvider
 from .wechat import WeChatWriterProvider
 from .registry import (
     get_writer_provider,
+    list_writer_providers,
     match_writer_provider,
     register_writer_provider,
     resolve_writer_create_target,
@@ -42,6 +43,7 @@ __all__ = [
     'WriterProviderWriteOutcomeError',
     'is_ambiguous_write_error',
     'get_writer_provider',
+    'list_writer_providers',
     'match_writer_provider',
     'register_writer_provider',
     'resolve_writer_create_target',

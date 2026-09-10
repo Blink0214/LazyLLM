@@ -18,10 +18,14 @@ from lazyllm.tools.writer.provider import (
     NotionWriterProvider,
     WeChatWriterProvider,
     WriterProviderBase,
+    WriterProviderCapabilities,
     WriterProviderCapabilityError,
     WriterProviderDocument,
     WriterProviderWriteOutcomeError,
+    list_writer_providers,
+    register_writer_provider,
 )
+from lazyllm.tools.writer.provider import registry as provider_registry
 from lazyllm.tools.writer.tools.resource_tools import WriterResourceTools
 
 
@@ -58,6 +62,18 @@ def test_optional_provider_capabilities_default_to_unsupported():
 )
 def test_builtin_providers_declare_tested_capabilities(provider_class, expected):
     assert provider_class.capabilities.model_dump() == expected
+
+
+def test_provider_registry_lists_new_provider_without_a_fixed_enum(monkeypatch):
+    class TestWriterProvider(WriterProviderBase):
+        provider = 'test'
+        capabilities = WriterProviderCapabilities(load=True, append=True)
+
+    monkeypatch.setattr(provider_registry, '_PROVIDERS', dict(provider_registry._PROVIDERS))
+    register_writer_provider(TestWriterProvider)
+
+    providers = {item['id']: item['capabilities'] for item in list_writer_providers()}
+    assert providers['test'] == ['load', 'append']
 
 
 def test_resource_create_requires_explicit_provider(tmp_path: Path):
