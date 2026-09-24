@@ -69,6 +69,14 @@ class MinimaxChat(OnlineChatModuleBase, FileHandlerBase):
     def _get_system_prompt(self):
         return 'You are an intelligent assistant provided by Minimax. You are a helpful assistant.'
 
+    def _prepare_request_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = dict(data)
+        if data.get('stream'):
+            stream_options = dict(data.get('stream_options') or {})
+            stream_options.setdefault('include_usage', True)
+            data['stream_options'] = stream_options
+        return data
+
     def _convert_msg_format(self, msg: Dict[str, Any]):
         '''Convert the reasoning_details in output to reasoning_content field in message'''
         choices = msg.get('choices')
