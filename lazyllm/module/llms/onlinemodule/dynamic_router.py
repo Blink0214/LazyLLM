@@ -123,7 +123,15 @@ class _DynamicSourceRouterMixin(ModuleBase):
 
     def forward(self, *args, **kwargs):
         merged = self._merge_dynamic_forward_kwargs(kwargs)
-        return self._get_supplier().forward(*args, **merged)
+        supplier = self._get_supplier()
+        # Let the supplier aggregate each call into the parent exactly once.
+        # Adding its cumulative usage here would double-count earlier calls.
+        supplier.used_by(getattr(self, '_used_by_moduleid', None))
+        result = supplier.forward(*args, **merged)
+        usage = (globals.get('usage') or {}).get(getattr(supplier, '_module_id', None))
+        if usage:
+            globals['usage'][self._module_id] = dict(usage)
+        return result
 
 
 ConfigsDict = _GlobalConfig.ConfigsDict

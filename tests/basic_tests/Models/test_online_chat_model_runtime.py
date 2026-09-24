@@ -884,3 +884,35 @@ def test_record_usage_preserves_known_provider_frames_across_unknown_call():
     assert recorded['prompt_tokens'] == -1
     assert recorded['completion_tokens'] == -1
     assert recorded['provider_usages'] == [first_provider_usage, third_provider_usage]
+
+
+@pytest.mark.parametrize('provider', [DeepSeekChat, MinimaxChat])
+def test_stream_usage_is_requested_without_overriding_explicit_options(provider):
+    module = provider(api_key='test-key')
+    data = {'stream': True, 'stream_options': {'extra': 'retained'}}
+    assert module._prepare_request_data(data)['stream_options'] == {'extra': 'retained', 'include_usage': True}
+    assert data['stream_options'] == {'extra': 'retained'}
+    assert module._prepare_request_data({'stream': True, 'stream_options': {'include_usage': False}})['stream_options']['include_usage'] is False
+    assert module._prepare_request_data({'stream': False}) == {'stream': False}
+
+
+def test_dynamic_router_usage_does_not_add_cumulative_total_to_parent(monkeypatch):
+    router = lazyllm.OnlineChatModule(source='dynamic', type='llm', model='mock-chat', url='http://provider.test/v1/')
+    supplier = OpenAIChat(api_key='test-key', model='mock-chat')
+    parent = 'dynamic-usage-test-parent'
+    router.used_by(parent)
+    monkeypatch.setattr(router, '_get_supplier', lambda: supplier)
+    def forward(*args, **kwargs):
+        supplier._record_usage({'prompt_tokens': 12, 'completion_tokens': 3,
+                                'provider_usage': {'prompt_tokens': 12, 'completion_tokens': 3}})
+        return 'ok'
+    monkeypatch.setattr(supplier, 'forward', forward)
+    try:
+        assert router.forward('one') == router.forward('two') == 'ok'
+        for mid in (router._module_id, supplier._module_id, parent):
+            assert lazyllm.globals['usage'][mid]['prompt_tokens'] == 24
+            assert lazyllm.globals['usage'][mid]['completion_tokens'] == 6
+            assert len(lazyllm.globals['usage'][mid]['provider_usages']) == 2
+    finally:
+        for mid in (router._module_id, supplier._module_id, parent):
+            lazyllm.globals['usage'].pop(mid, None)
